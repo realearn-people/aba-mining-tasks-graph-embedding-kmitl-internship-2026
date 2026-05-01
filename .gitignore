@@ -1,0 +1,10 @@
+# Ignore large files inside output folders only
+rotate_output/*.csv
+rotate_output/*.xlsx
+rotate_pnnp_output/*.csv
+rotate_pnnp_output/*.xlsx
+transe_output/*.csv
+transe_output/*.xlsx
+transe_pnnp_output/*.csv
+transe_pnnp_output/*.xlsx
+
