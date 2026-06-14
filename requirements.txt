@@ -1,0 +1,23 @@
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Machine learning & KGE
+torch>=2.0.0
+pykeen>=1.10.0
+
+# Dimensionality reduction
+scikit-learn>=1.3.0
+
+# Excel export
+openpyxl>=3.1.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Mock data generation (tests)
+faker>=18.0.0
+
+# Config files
+pyyaml>=6.0
