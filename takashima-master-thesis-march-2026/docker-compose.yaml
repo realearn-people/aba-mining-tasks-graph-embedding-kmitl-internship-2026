@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TORCH_DEVICE: cpu
+    container_name: aba-mining-app
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    command: bash
+
+  # GPU有効化版（NVIDIA Container Toolkit が必要）
+  app-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TORCH_DEVICE: cu121
+    profiles: ["gpu"]
+    container_name: aba-mining-app-gpu
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+    command: bash
+
+

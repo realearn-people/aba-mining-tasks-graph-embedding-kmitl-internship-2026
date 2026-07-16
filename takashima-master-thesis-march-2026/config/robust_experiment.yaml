@@ -1,0 +1,156 @@
+# =============================================================================
+# Robust Experiment Configuration
+# =============================================================================
+
+# データ設定
+data:
+  input_graph: "data/output/aba_graph_my_dataset_combined.pkl"
+  base_output_dir: "data/training_results"
+  experiment_id: null  # 実験ID（nullの場合はタイムスタンプで自動生成、コマンドライン引数で上書き可能）
+  seed: 42
+  # 2 → binary  (CONTRARY_TO=1, NOT_CONTRARY+SUPPORT=0, uses labeled data as negatives)
+  # 3 → 3-class (SUPPORT=0, NOT_CONTRARY=1, CONTRARY_TO=2, CrossEntropy loss)
+  num_classes: 3
+
+# ネガティブサンプリング設定
+negative_sampling:
+  hard_negatives:
+    enabled: true
+    ratio: 0.4  # 全ネガティブサンプルに対する割合
+  structural_negatives:
+    enabled: true
+    ratio: 0.3
+  random_negatives:
+    enabled: true
+    ratio: 0.3
+
+# 対照学習設定
+contrastive_learning:
+  enabled: true  # 対照学習の有効化
+  hidden_dim: 256  # 隠れ層次元
+  output_dim: 128  # 出力埋め込み次元（RGCNの入力次元と合わせる）
+  temperature: 0.07  # 温度パラメータ
+  dropout: 0.1  # ドロップアウト率
+  num_epochs: 50  # 事前学習エポック数
+  learning_rate: 0.001  # 学習率
+  batch_size: 128  # バッチサイズ（ペア数）
+  evaluate_quality: true  # 埋め込み品質評価の実行
+
+# Cross-validation設定
+cross_validation:
+  n_folds: 5
+  split_strategy: "edge_level_random"  # "edge_level_random" or "review_id_based"
+  val_split_ratio: 0.2  # 訓練データから検証データを分割する割合
+
+# モデル設定
+models:
+  # R-GCN (Attack Link Predictor)
+  rgcn:
+    enabled: true
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.1
+    learning_rate: 0.001
+    num_epochs: 100
+    optimizer: "Adam"
+    loss_function: "BCEWithLogitsLoss"
+    early_stopping_patience: 10
+    verbose: true
+
+  # Improved BERT (固定BERT + 線形層学習)
+  improved_bert:
+    enabled: true
+    model_name: "google-bert/bert-base-uncased"
+    freeze_bert: true
+    max_length: 128
+    dropout: 0.3
+    learning_rate: 1e-3
+    num_epochs: 20
+    batch_size: 16
+    val_batch_size: 32
+    optimizer: "Adam"
+    scheduler:
+      type: "StepLR"
+      step_size: 5
+      gamma: 0.7
+    early_stopping_patience: 5
+    architecture:
+      - 768  # hidden_size
+      - 384  # hidden_size // 2
+      - 192  # hidden_size // 4
+      - 1    # output
+
+  # Cross-Encoder BERT
+  cross_encoder_bert:
+    enabled: true
+    model_name: "google-bert/bert-base-uncased"
+    freeze_bert: true
+    max_length: 256  # ペアを処理するため長めに
+    dropout: 0.3
+    learning_rate: 1e-3
+    num_epochs: 20
+    batch_size: 16
+    val_batch_size: 32
+    optimizer: "Adam"
+    scheduler:
+      type: "StepLR"
+      step_size: 5
+      gamma: 0.7
+    early_stopping_patience: 5
+    architecture:
+      - 384  # hidden_size // 2
+      - 192  # hidden_size // 4
+      - 1    # output
+
+  # Random Baseline
+  random_baseline:
+    enabled: true
+
+  # BERT Cosine Similarity Baseline
+  bert_cosine:
+    enabled: true
+    threshold: 0.5
+
+  # TF-IDF + Logistic Regression Baseline
+  tfidf_lr:
+    enabled: true
+
+# 評価設定
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1"
+    - "auc"
+  statistical_test:
+    method: "paired_t_test"
+    alpha: 0.05
+
+# 可視化設定
+visualization:
+  enabled: true
+  save_plots: true
+  plot_formats: ["png", "pdf"]
+  plot_dpi: 300
+  show_plots: false  # CI環境での実行を考慮
+  plots:
+    - "training_curves"
+    - "box_plots"
+    - "bar_charts"
+    - "scatter_plots"
+    - "comprehensive_analysis"
+
+# ログ設定
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
+  log_dir: "../logs"
+
+# 計算環境設定
+compute:
+  device: "auto"  # "auto", "cpu", "cuda"  
+  num_workers: 4
+  pin_memory: true
+

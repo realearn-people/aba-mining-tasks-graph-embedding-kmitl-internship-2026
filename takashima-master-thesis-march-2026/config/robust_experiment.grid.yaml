@@ -1,0 +1,148 @@
+# =============================================================================
+# Robust Experiment Configuration (Grid Search Fixed)
+# =============================================================================
+
+# データ設定
+data:
+  input_graph: "data/output/aba_graph_room_staff_combined.pkl"
+  base_output_dir: "data/training_results"
+  experiment_id: null  # 実験IDはコマンドライン引数で指定（サフィックス付与なし）
+  seed: 42  # 再現性のため固定
+
+# ネガティブサンプリング設定
+negative_sampling:
+  hard_negatives:
+    enabled: true
+    ratio: 0.4
+  structural_negatives:
+    enabled: true
+    ratio: 0.3
+  random_negatives:
+    enabled: true
+    ratio: 0.3
+
+# 対照学習設定（デフォルトは実行時に無効化される）
+contrastive_learning:
+  enabled: true
+  hidden_dim: 256
+  output_dim: 128
+  temperature: 0.07
+  dropout: 0.1
+  num_epochs: 50
+  learning_rate: 0.001
+  batch_size: 128
+  evaluate_quality: true
+
+# Cross-validation設定（固定）
+cross_validation:
+  n_folds: 5
+  split_strategy: "edge_level_random"
+  val_split_ratio: 0.2
+
+# モデル設定
+models:
+  rgcn:
+    enabled: true
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.1
+    learning_rate: 0.001
+    num_epochs: 100
+    optimizer: "Adam"
+    loss_function: "BCEWithLogitsLoss"
+    early_stopping_patience: 10
+    verbose: true
+
+  improved_bert:
+    enabled: true
+    model_name: "google-bert/bert-base-uncased"
+    freeze_bert: true
+    max_length: 128
+    dropout: 0.3
+    learning_rate: 1e-3
+    num_epochs: 20
+    batch_size: 16
+    val_batch_size: 32
+    optimizer: "Adam"
+    scheduler:
+      type: "StepLR"
+      step_size: 5
+      gamma: 0.7
+    early_stopping_patience: 5
+    architecture:
+      - 768
+      - 384
+      - 192
+      - 1
+
+  cross_encoder_bert:
+    enabled: true
+    model_name: "google-bert/bert-base-uncased"
+    freeze_bert: true
+    max_length: 256
+    dropout: 0.3
+    learning_rate: 1e-3
+    num_epochs: 20
+    batch_size: 16
+    val_batch_size: 32
+    optimizer: "Adam"
+    scheduler:
+      type: "StepLR"
+      step_size: 5
+      gamma: 0.7
+    early_stopping_patience: 5
+    architecture:
+      - 384
+      - 192
+      - 1
+
+  random_baseline:
+    enabled: true
+
+  bert_cosine:
+    enabled: true
+    threshold: 0.5
+
+  tfidf_lr:
+    enabled: true
+
+# 評価設定
+evaluation:
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1"
+    - "auc"
+  statistical_test:
+    method: "paired_t_test"
+    alpha: 0.05
+
+# 可視化設定
+visualization:
+  enabled: true
+  save_plots: true
+  plot_formats: ["png", "pdf"]
+  plot_dpi: 300
+  show_plots: false
+  plots:
+    - "training_curves"
+    - "box_plots"
+    - "bar_charts"
+    - "scatter_plots"
+    - "comprehensive_analysis"
+
+# ログ設定
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  save_to_file: true
+  log_dir: "../logs"
+
+# 計算環境設定
+compute:
+  device: "auto"
+  num_workers: 4
+  pin_memory: true
+
+

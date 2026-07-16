@@ -1,0 +1,99 @@
+# Configuration for ABA Link Prediction
+
+# Data settings
+data:
+  train_path: "data/output/Silver_Room_ContP_BodyN_4omini.csv"
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  batch_size: 32
+  num_workers: 4
+
+# Model settings
+models:
+  rgcn:
+    hidden_dim: 128
+    num_layers: 2
+    num_relations: 2
+    dropout: 0.5
+    use_node_features: true
+    
+  rgcn_attention:
+    hidden_dim: 128
+    num_layers: 2
+    num_relations: 2
+    num_heads: 4
+    dropout: 0.5
+    use_node_features: true
+    
+  bert:
+    model_name: "bert-base-uncased"
+    hidden_dim: 768
+    dropout: 0.3
+    freeze_bert: false
+    pooling_strategy: "cls"
+    max_length: 128
+    
+  cross_encoder:
+    model_name: "bert-base-uncased"
+    dropout: 0.3
+    freeze_bert: false
+    max_length: 256
+
+# Training settings
+training:
+  num_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler_type: "cosine"
+  warmup_steps: 100
+  early_stopping_patience: 5
+  gradient_clip: 1.0
+  
+  # BERT-specific settings
+  bert_learning_rate: 0.00002
+  bert_num_epochs: 10
+  
+  # Contrastive learning settings
+  contrastive:
+    num_epochs: 100
+    learning_rate: 0.0003
+    temperature: 0.07
+    augmentation_prob: 0.2
+    batch_size: 64
+
+# Evaluation settings
+evaluation:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+    - roc_auc
+    - average_precision
+  graph_metrics:
+    - hits@1
+    - hits@3
+    - hits@10
+    - mrr
+  threshold: 0.5
+
+# Paths
+paths:
+  models_dir: "models/aba_link_prediction"
+  logs_dir: "logs/aba_link_prediction"
+  results_dir: "results/aba_link_prediction"
+  
+# Experiment settings
+experiment:
+  name: "aba_link_prediction_experiment"
+  seed: 42
+  device: "cuda"  # or "cpu"
+  save_best_model: true
+  verbose: true
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "aba_link_prediction.log"
