@@ -1,0 +1,70 @@
+data:
+  # 入力グラフ（存在しない場合は data/output/... を自動フォールバック）
+  input_graph: "data/aba_graph_room_staff_combined.pkl"
+  base_output_dir: "data/training_results"
+  experiment_id: null
+  seed: 42
+
+experiment:
+  sizes: [0.2, 0.4, 0.6, 0.8, 1.0]
+  seeds: [42, 43, 44]
+  val_split_ratio: 0.2           # 学習プールから検証を固定分割（サイズ変更では触らない）
+  min_positive: 50               # QC: 各サイズ・シードでの最小正例数（満たせなければスキップ/警告）
+  min_negative: 50               # QC: 各サイズ・シードでの最小負例数
+  enforce_balance: false         # 必須では再サンプリングしない（ログのみ）
+
+compute:
+  device: "auto"                 # "auto" | "cpu" | "cuda"
+  num_workers: 0
+
+negative_sampling:
+  hard_negatives:
+    enabled: true
+    ratio: 0.4
+  structural_negatives:
+    enabled: true
+    ratio: 0.3
+  random_negatives:
+    enabled: true
+    ratio: 0.3
+
+models:
+  rgcn:
+    enabled: true
+    hidden_dim: 128
+    num_layers: 2
+    learning_rate: 0.001
+    num_epochs: 200
+    verbose: true
+  improved_bert:
+    enabled: true
+    model_name: "google-bert/bert-base-uncased"
+    dropout: 0.2
+    max_length: 128
+    batch_size: 32
+    val_batch_size: 64
+    learning_rate: 3.0e-05
+    num_epochs: 10
+    early_stopping_patience: 3
+    scheduler:
+      type: "StepLR"
+      step_size: 3
+      gamma: 0.7
+  cos_sim:
+    enabled: true
+  tfidf:
+    enabled: true
+    max_features: 5000
+    C: 3.0
+    solver: liblinear
+    class_weight: null
+    ngram_range: [1, 1]
+    min_df: 1
+    max_iter: 200
+
+visualization:
+  enabled: true
+  show_plots: false
+  plots: ["size_vs_metrics", "loss_curves"]
+
+

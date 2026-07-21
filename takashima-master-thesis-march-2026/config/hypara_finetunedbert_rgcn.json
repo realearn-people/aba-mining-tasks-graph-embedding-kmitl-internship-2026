@@ -1,0 +1,11 @@
+{
+  "hidden_dim": [256],
+  "num_layers": [4],
+  "dropout_link": [0.15],
+  "learning_rate": [1e-3],
+  "num_epochs": [200],
+  "max_length": [256],
+  "lora_r": [32],
+  "lora_alpha": [64],
+  "lora_dropout": [0.1]
+}
