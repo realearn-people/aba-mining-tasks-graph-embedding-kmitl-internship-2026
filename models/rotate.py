@@ -25,7 +25,9 @@ OUTPUT_DIR   = ROOT / "outputs" / "rotate_output"             # folder for saved
 RESULTS_FILE = ROOT / "data" / "experiment_results" / "experiment_results.xlsx"           # auto-recorded experiment log
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# ── Hyperparameters ───────────────────────────────────────────────────────────
+# ── Hyperparame
+# 
+# ters ───────────────────────────────────────────────────────────
 DATASET       = "ALL"      # dataset label for experiment record
 #DATASET       = "PNNP"
 EMBEDDING_DIM = 100        # size of each entity/relation vector
@@ -571,7 +573,16 @@ if __name__ == "__main__":
         rel_eval_path = OUTPUT_DIR / "relation_eval_ranked.csv"
         df_rel_eval.to_csv(rel_eval_path, index=False, mode='w')
         print(f"\nSaved: {rel_eval_path}  ({len(df_rel_eval):,} triples)")
-    
+
+        # Per-class and macro Hits@1
+        per_class_h1 = df_rel_eval.groupby('relation')['hits_at_1'].mean()
+        macro_h1 = per_class_h1.mean()
+        print("\nPer-class Hits@1:")
+        for rel, score in per_class_h1.items():
+            n = (df_rel_eval['relation'] == rel).sum()
+            print(f"  {rel:<25} {score:.4f}  (n={n})")
+        print(f"\nMacro Hits@1: {macro_h1:.4f}")
+
     except Exception as e:
         print(f"[ERROR] Relation-rank evaluation failed: {e}")
         import traceback; traceback.print_exc() 

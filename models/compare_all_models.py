@@ -44,8 +44,15 @@ matplotlib.rcParams.update({
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 ABA_DIR       = Path(__file__).resolve().parent.parent
-TAKASHIMA_EXP = (ABA_DIR.parent / "takashima-master-thesis-march-2026" /
-                 "data/training_results/exp_all_models_3class_fixed/experiment_results.json")
+_TAKASHIMA_CANDIDATES = [
+    ABA_DIR.parent / "takashima-master-thesis-march-2026" /
+        "data/training_results/exp_all_models_3class_fixed/experiment_results.json",
+    ABA_DIR.parent / "takashima-master-thesis-march-2026" /
+        "data/training_results/exp_all_models_3class_final/experiment_results.json",
+    ABA_DIR.parent / "realearn-repo" / "takashima-master-thesis-march-2026" /
+        "data/training_results/exp_all_models_3class_final/experiment_results.json",
+]
+TAKASHIMA_EXP = next((p for p in _TAKASHIMA_CANDIDATES if p.exists()), _TAKASHIMA_CANDIDATES[0])
 CSV_PATH      = ABA_DIR / "data/input_data/hotel_contrary_dataset_support.csv"
 
 RELS = ["CONTRARY_TO", "NOT_CONTRARY", "SUPPORT"]
@@ -60,6 +67,9 @@ C = {
     "ComplEx+LR":          "#9575CD",
     "DistMult+LR":         "#FFA726",
     "OneHot+LR":           "#8D6E63",
+    "GCN":                    "#00ACC1",
+    "GAT":                    "#00838F",
+    "GraphSAGE":              "#26C6DA",
     "BERT-RGCN\n(frozen)":    "#E91E63",
     "BERT-RGCN\n(finetuned)": "#F48FB1",
     "BERT-MLP\n(frozen)":     "#7B1FA2",
@@ -119,6 +129,31 @@ def load_kge(csv_path: Path):
         "AUC":        None,   # not computable without saved probability scores
         "per_rel":    {k: float(np.mean(per_rel.get(k, [0]))) for k in RELS},
         "prec_est":   True,   # precision/F1 are estimates
+    }
+
+
+def load_gnn(metrics_json: Path):
+    """Load a GCN/GAT/GraphSAGE run — plain, homogeneous graph, trained end-to-end
+    (see graph_construction.py / gnn_common.py). Metrics already computed with the
+    exact same methodology as run_lr() below (accuracy/macro P-R-F1/macro OvR AUC),
+    so these are directly comparable to the LR and Takashima rows."""
+    if not metrics_json.exists():
+        return None
+    with open(metrics_json) as f:
+        d = json.load(f)
+    m = d["metrics"]
+    return {
+        "MRR":        None,
+        "MR":         None,
+        "Micro-H@1":  m["Micro-H@1"],
+        "Macro-H@1":  m["Macro-H@1"],
+        "Accuracy":   m["Accuracy"],
+        "Precision":  m["Precision"],
+        "Recall":     m["Recall"],
+        "F1":         m["F1"],
+        "AUC":        m["AUC"],
+        "per_rel":    {},
+        "prec_est":   False,
     }
 
 
@@ -288,6 +323,11 @@ LR_MODELS = {
     "DistMult+LR": "distmult_sup_output",
     "OneHot+LR":   None,
 }
+GNN_MODELS = {
+    "GCN":       "gcn_gnn_output",
+    "GAT":       "gat_gnn_output",
+    "GraphSAGE": "graphsage_gnn_output",
+}
 
 kge_data: dict[str, dict] = {}
 for name, folder in KGE_MODELS.items():
@@ -303,15 +343,26 @@ for name, folder in LR_MODELS.items():
     lr_data[name] = m
     print(f"MRR={m['MRR']:.4f}  MR={m['MR']:.4f}  AUC={m['AUC']:.4f}")
 
+print("Loading GCN / GAT / GraphSAGE results (plain, homogeneous graph)...")
+gnn_data: dict[str, dict] = {}
+for name, folder in GNN_MODELS.items():
+    m = load_gnn(ABA_DIR / "outputs" / folder / "metrics.json")
+    if m:
+        gnn_data[name] = m
+        print(f"  {name}: Acc={m['Accuracy']:.4f}  F1={m['F1']:.4f}  AUC={m['AUC']:.4f}")
+    else:
+        print(f"  {name}: [MISSING] run models/{name.lower()}.py first")
+
 tak_data: dict[str, dict] = load_takashima(TAKASHIMA_EXP)
 
-all_models: dict[str, dict] = {**kge_data, **lr_data, **tak_data}
+all_models: dict[str, dict] = {**kge_data, **lr_data, **gnn_data, **tak_data}
 all_names  = list(all_models.keys())
 all_colors = [C.get(n, "#999") for n in all_names]
 all_x      = np.arange(len(all_names))
 
 sep_kge = len(kge_data)  - 0.5   # between KGE and LR
-sep_lr  = len(kge_data) + len(lr_data) - 0.5  # between LR and Takashima
+sep_lr  = len(kge_data) + len(lr_data) - 0.5  # between LR and GNN
+sep_gnn = len(kge_data) + len(lr_data) + len(gnn_data) - 0.5  # between GNN and Takashima
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -323,28 +374,33 @@ def pval(v, est=False, na=False):
     return f"{'~' if est else ' '}{v:>6.4f}"
 
 print("\n" + "="*105)
-print("TABLE 1 — Rank-Based Metrics  (all 15 models)")
-print("  KGE: from CSV   LR: re-run predict_proba   TAK: exp_20260528_3R JSON  5-fold CV mean")
+print(f"TABLE 1 — Rank-Based Metrics  (all {len(all_names)} models)")
+print("  KGE: from CSV   LR: re-run predict_proba   GNN: plain homogeneous graph, end-to-end   "
+      "TAK: R-GCN baseline JSON")
 print("="*105)
 print(f"{'Model':<22} {'Src':<4} {'MRR':>7} {'MR':>7} {'Micro-H@1':>10} {'Macro-H@1':>10}")
 print("-"*65)
 for name, src in [(n,"KGE") for n in kge_data] + \
                  [(n,"LR")  for n in lr_data]  + \
+                 [(n,"GNN") for n in gnn_data] + \
                  [(n,"TAK") for n in tak_data]:
     m = all_models[name]
+    mrr_s = f"{m['MRR']:>7.4f}" if m['MRR'] is not None else f"{'N/A':>7}"
+    mr_s  = f"{m['MR']:>7.4f}"  if m['MR']  is not None else f"{'N/A':>7}"
     print(f"{name.replace(chr(10),' '):<22} {src:<4} "
-          f"{m['MRR']:>7.4f} {m['MR']:>7.4f} "
+          f"{mrr_s} {mr_s} "
           f"{m['Micro-H@1']:>10.4f} {m['Macro-H@1']:>10.4f}")
 
 print("\n" + "="*105)
 print("TABLE 2 — Classification Metrics  (3-class macro-averaged)")
 print("  KGE Precision/F1: ~ estimated (proportional error distribution); AUC: N/A")
-print("  LR: exact from predict_proba + eval CSV   TAK: exp_20260528_3R JSON")
+print("  LR / GNN: exact from predict_proba (softmax)   TAK: R-GCN baseline JSON")
 print("="*105)
 print(f"{'Model':<22} {'Src':<4} {'Acc':>7} {'Prec~':>7} {'Recall':>7} {'F1~':>7} {'AUC':>7}")
 print("-"*65)
 for name, src in [(n,"KGE") for n in kge_data] + \
                  [(n,"LR")  for n in lr_data]  + \
+                 [(n,"GNN") for n in gnn_data] + \
                  [(n,"TAK") for n in tak_data]:
     m   = all_models[name]
     est = m.get("prec_est", False)
@@ -399,7 +455,7 @@ def simple_bar(ax, x, values, colors, ylim, ylabel, title,
 
 
 def add_seps(ax, ylim):
-    for xv, la, lb in [(sep_kge, "KGE", "LR"), (sep_lr, "LR", "Takashima")]:
+    for xv, la, lb in [(sep_kge, "KGE", "LR"), (sep_lr, "LR", "GNN"), (sep_gnn, "GNN", "Takashima")]:
         ax.axvline(xv, color="#bbb", linewidth=0.9, linestyle="--", zorder=2)
         ax.text(xv-0.15, ylim[1]*0.985, la, ha="right", va="top",
                 fontsize=5.8, color="#888")
@@ -426,8 +482,8 @@ tick_all  = [n for n in all_names]   # newlines kept for multiline labels
 # ══════════════════════════════════════════════════════════════════════════════
 fig = plt.figure(figsize=(28, 18))
 fig.suptitle(
-    "Model Comparison — KGE  |  LR on KGE embeddings  |  Takashima BERT/RGCN   "
-    "[ABA mining + exp_20260528_3R, 3-class, 15 models]",
+    "Model Comparison — KGE  |  LR on KGE embeddings  |  GCN/GAT/GraphSAGE (plain graph)  |  "
+    f"Takashima BERT/RGCN   [ABA mining, 3-class, {len(all_names)} models]",
     fontsize=12.5, fontweight="bold", y=0.997,
 )
 gs = GridSpec(3, 3, figure=fig,
@@ -437,9 +493,9 @@ gs = GridSpec(3, 3, figure=fig,
 axes = [[fig.add_subplot(gs[r, c]) for c in range(3)] for r in range(3)]
 
 for ytxt, txt in [
-    (0.970, "Rank-Based Metrics — all 15 models  "
-            "(KGE from CSV  ·  LR re-run predict_proba  ·  Takashima from JSON)"),
-    (0.645, "Classification Metrics — all 15 models  "
+    (0.970, f"Rank-Based Metrics — all {len(all_names)} models  "
+            "(KGE from CSV  ·  LR re-run predict_proba  ·  GNN end-to-end  ·  Takashima from JSON)"),
+    (0.645, f"Classification Metrics — all {len(all_names)} models  "
             "(3-class macro  ·  ~ = estimated for KGE  ·  N/A = not computable)"),
 ]:
     fig.text(0.5, ytxt, txt, ha="center", va="top", fontsize=9, color="#444",
@@ -510,7 +566,9 @@ for i, name in enumerate(all_names):
     prec = m.get("Precision"); rec = m.get("Recall")
     if prec is None or rec is None: continue
     col  = C.get(name, "#999")
-    mkr  = "s" if name in kge_data else ("o" if name in lr_data else "^")
+    mkr  = ("s" if name in kge_data else
+            "o" if name in lr_data else
+            "D" if name in gnn_data else "^")
     ax12.scatter(rec, prec, color=col, s=100, marker=mkr, zorder=5,
                  edgecolors="white", linewidths=0.8)
     ax12.annotate(name.replace("\n"," "), (rec, prec),
@@ -519,7 +577,7 @@ for i, name in enumerate(all_names):
 ax12.set_xlim(-0.05, 1.1); ax12.set_ylim(-0.05, 1.1)
 ax12.set_xlabel("Recall  (macro, 3-class)", fontsize=8)
 ax12.set_ylabel("Precision  (macro, 3-class  ~ = est.)", fontsize=8)
-ax12.set_title("Precision vs. Recall\n(■ KGE  ● LR  ▲ Takashima  ~ = KGE estimated)")
+ax12.set_title("Precision vs. Recall\n(■ KGE  ● LR  ◆ GNN  ▲ Takashima  ~ = KGE estimated)")
 ax12.grid(True, color="#e5e5e5", zorder=0, linewidth=0.6); ax12.set_axisbelow(True)
 ax12.plot([0,1],[0,1], color="#ccc", linewidth=0.8, linestyle=":", zorder=1)
 
@@ -553,6 +611,7 @@ add_seps(axes[2][2], (0, 1.12))
 # ── global legend ─────────────────────────────────────────────────────────────
 items = ([(n, C[n], "s") for n in kge_data] +
          [(n.replace("\n","+"), C[n], "o") for n in lr_data] +
+         [(n, C.get(n,"#999"), "D") for n in gnn_data] +
          [(n.replace("\n"," "), C.get(n,"#999"), "^") for n in tak_data])
 handles = [plt.scatter([],[],color=col,marker=mk,s=55,label=lbl,
                         edgecolors="white",linewidths=0.5)
@@ -593,6 +652,8 @@ for name in all_names:
         src, group = "KGE", "aba_mining_kge"
     elif name in lr_data:
         src, group = "LR", "aba_mining_lr"
+    elif name in gnn_data:
+        src, group = "GNN", "aba_mining_gnn"
     else:
         src, group = "Takashima", "takashima"
 
