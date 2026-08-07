@@ -70,6 +70,7 @@ C = {
     "GCN":                    "#00ACC1",
     "GAT":                    "#00838F",
     "GraphSAGE":              "#26C6DA",
+    "RGCN\n(ours, typed)":    "#AD1457",
     "BERT-RGCN\n(frozen)":    "#E91E63",
     "BERT-RGCN\n(finetuned)": "#F48FB1",
     "BERT-MLP\n(frozen)":     "#7B1FA2",
@@ -327,6 +328,7 @@ GNN_MODELS = {
     "GCN":       "gcn_gnn_output",
     "GAT":       "gat_gnn_output",
     "GraphSAGE": "graphsage_gnn_output",
+    "RGCN\n(ours, typed)": "rgcn_gnn_output",
 }
 
 kge_data: dict[str, dict] = {}
