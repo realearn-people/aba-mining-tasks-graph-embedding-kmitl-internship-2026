@@ -90,20 +90,22 @@ results (see `compare_all_models.png`):
 Each run saves to `outputs/<model>_gnn_output/`: `entity_embeddings.csv`, `test_predictions.csv`
 (per-triple predicted class + softmax probabilities), and `metrics.json`.
 
-### R-GCN on a Heterogeneous Graph (typed nodes + typed edges)
+### R-GCN and HAN on a Heterogeneous Graph (typed nodes + typed edges)
 
 | File | Description |
 |---|---|
 | `models/graph_construction_hetero.py` | Builds the typed graph on top of `ABAHomogeneousGraph` (same entities, features, split). Node types — `claim` / `body` / `attacker` — come from the naming convention already used for the ABA tree (`sup_transe.py::get_node_level`). Edge types are the **structural** `(head_type, tail_type)` pairs observed in the data (`attacker→body`, `body→body`, `attacker→claim`, `body→claim`, + reverses) — not the relation label itself. |
 | `models/rgcn_common.py` | R-GCN encoder (`torch_geometric.nn.RGCNConv`, relation-aware) + the same edge classifier / training loop / metrics as `gnn_common.py`. |
 | `models/rgcn.py` | Trains R-GCN end-to-end on the typed graph. |
+| `models/han_common.py` | HAN encoder (`torch_geometric.nn.HANConv`, node-level + semantic-level attention) on the **identical** typed graph/edges as R-GCN — same `x_dict`/`edge_index_dict` built straight from `ABAHeteroGraph`'s edges, same classifier head, split, and metrics — so the only variable is the encoder. |
+| `models/han.py` | Trains HAN end-to-end on the typed graph. |
 
 **Why edge types are structural, not the relation label:** using CONTRARY_TO/NOT_CONTRARY/SUPPORT
-as the R-GCN edge type would leak the prediction target into the graph structure. Verified in
+as the R-GCN/HAN edge type would leak the prediction target into the graph structure. Verified in
 the data: `SUPPORT` occurs **iff** `tail_type == claim`, with zero exceptions — node type alone
 already determines SUPPORT vs. not. So node type is safe to expose (it's a property of the
 data, not the specific label being predicted); the 3-way classification stays a decoder task on
-top of R-GCN's node embeddings, exactly like the plain GCN/GAT/GraphSAGE models.
+top of the encoder's node embeddings, exactly like the plain GCN/GAT/GraphSAGE models.
 
 Test results:
 
@@ -111,6 +113,7 @@ Test results:
 |---|---|---|---|---|
 | GCN (plain) | 0.945 | 0.576 | 0.682 | |
 | R-GCN (typed, ours) | 0.948 | 0.663 | 0.878 | CONTRARY_TO recall only 2.5% — attacker→body edges are ~34:1 imbalanced, worse than the dataset average |
+| **HAN (typed, ours)** | 0.903 | **0.772** | **0.934** | Same graph as R-GCN. CONTRARY_TO recall 54.6% (vs. R-GCN's 2.5%) — attention over neighbors handles the attacker→body imbalance far better than R-GCN's fixed per-relation weight matrix |
 | BERT-RGCN (Takashima baseline) | 0.938 | 0.857 | 0.987 | has BERT text features, ours doesn't |
 
 ### Comparison and Visualization
@@ -150,6 +153,8 @@ aba-mining-tasks-graph-embedding-kmitl-internship-2026/
 │   ├── graph_construction_hetero.py ← Typed (heterogeneous) ABA graph
 │   ├── rgcn_common.py         ← R-GCN encoder + train/eval loop
 │   ├── rgcn.py                ← R-GCN training + evaluation
+│   ├── han_common.py          ← HAN encoder + train/eval loop (same typed graph as R-GCN)
+│   ├── han.py                 ← HAN training + evaluation
 │   ├── caliensemble.py        ← Calibrated ensemble (all 5 KGE models)
 │   ├── compare_all_models.py  ← Full comparison (KGE + LR + GNN + Takashima)
 │   ├── visualize_results.py   ← Visualization from experiment Excel
@@ -165,6 +170,7 @@ aba-mining-tasks-graph-embedding-kmitl-internship-2026/
     ├── gat_gnn_output/           ← GAT outputs
     ├── graphsage_gnn_output/     ← GraphSAGE outputs
     ├── rgcn_gnn_output/          ← R-GCN (typed graph) outputs
+    ├── han_gnn_output/           ← HAN (typed graph) outputs
     ├── ensemble_output/          ← Ensemble results
     └── compare_all_models.png    ← 3×3 comparison figure (18 models)
 ```
@@ -199,11 +205,11 @@ python gcn.py         # or gat.py, graphsage.py
 
 No GPU required (800-node graph, full-batch training, seconds per run).
 
-### 4. R-GCN on the typed graph
+### 4. R-GCN / HAN on the typed graph
 
 ```bash
 cd models
-python rgcn.py
+python rgcn.py   # or han.py — same graph, attention-based encoder instead
 ```
 
 ### 5. Calibrated ensemble
