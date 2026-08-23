@@ -25,7 +25,7 @@ RESULTS_FILE = ROOT / "data" / "experiment_results" / "sup_experiment_results.xl
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ── Hyperparameters ───────────────────────────────────────────────────────────
-DATASET       = "PNNP"      # dataset label for experiment record
+DATASET       = "ALL"      # dataset label for experiment record
 EMBEDDING_DIM = 100        # size of each entity/relation vector
 NUM_EPOCHS    = 1000       # max epochs — early stopper will stop earlier
 BATCH_SIZE    = 256        # number of triples processed per update step

@@ -6,6 +6,10 @@ numpy>=1.24.0
 torch>=2.0.0
 pykeen>=1.10.0
 
+# GNN baselines (GCN/GAT/GraphSAGE) — install a build matching your torch+CUDA version,
+# see https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html
+torch-geometric>=2.5.0
+
 # Dimensionality reduction
 scikit-learn>=1.3.0
 

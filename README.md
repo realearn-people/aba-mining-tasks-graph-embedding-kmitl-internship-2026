@@ -1,139 +1,245 @@
 # aba-mining-tasks-graph-embedding-kmitl-internship-2026
 
-This is a repository that contains the experiments for ABA mining tasks (using graph embedding), jointly conducted with an internship student from KMITL in April 2026.
+Research project exploring Knowledge Graph Embedding (KGE) models for Assumption-Based Argumentation (ABA) relation prediction. Conducted jointly with an internship student from KMITL (April – June 2026).
+
+## Task
+
+Given a triple `(head, ?, tail)`, predict the ABA relation — **CONTRARY_TO**, **NOT_CONTRARY**, or **SUPPORT** — between nodes derived from hotel review arguments.
+
+## Dataset
+
+**`data/input_data/hotel_contrary_dataset_support.csv`**
+
+| Relation | Count | % | Meaning |
+|---|---|---|---|
+| NOT_CONTRARY | ~86,873 | ~93.9% | Body pairs that are not contrary to each other |
+| CONTRARY_TO | ~4,776 | ~5.2% | Body pairs where one is contrary to the other |
+| SUPPORT | ~804 | ~0.9% | Body → claim inference edges |
+
+Domains: **staff**, **price**, **check-in**, **check-out**
+
+Split: stratified by `domain × relation` (80 / 10 / 10 train / val / test).  
+Groups with fewer than 10 rows go entirely into train to avoid empty val/test splits.
+
+## Models
+
+### KGE Models (PyKEEN)
+
+All five models share the same training configuration:
+- Optimizer: Adam (lr = 0.0001)
+- Loss: NSSALoss (adversarial temp = 0.5)
+- Negative sampling: relation corruption only (3 negatives per positive)
+- Training loop: sLCWA
+- Early stopping: patience 10, frequency 10 epochs
+
+| File | Model | Scoring function | Symmetry |
+|---|---|---|---|
+| `models/sup_rotate.py` | RotatE | `\|h ∘ r - t\|` (complex rotation) | symmetric + antisymmetric |
+| `models/sup_complex.py` | ComplEx | `Re(hᵀ · diag(r) · conj(t))` | symmetric + antisymmetric |
+| `models/sup_distmult.py` | DistMult | `sum(h * r * t)` | symmetric only |
+| `models/sup_convkb.py` | ConvKB | convolutional over `[h, r, t]` | asymmetric |
+| `models/sup_transe.py` | TransE | `\|h + r - t\|` (translation) | neither |
+
+Each training script produces:
+- `visualization_data.csv` — scored triples with 2D PCA entity coordinates
+- `aba_tree_structure.csv` — ABA tree (claim → body → attacker with scores)
+- `entity_embeddings.cs   devv` — full embedding matrix (one row per entity)
+- `trained_model_<Model>.pkl` — saved model weights (for ensemble)
+- `triples_factory_<Model>.pkl` — entity/relation ID mapping
+- `relation_eval_ranked.csv` — per-triple relation ranking results
+- `negative_samples.csv` — all negative triples generated during training
+
+### LR Baselines
+
+| File | Description |
+|---|---|
+| `models/lr_baseline.py` | Logistic Regression on KGE entity embeddings; tries 4 feature strategies: concat, diff, hadamard, all |
+| `models/lr_onehot.py` | Logistic Regression on one-hot entity encoding (no KGE embeddings needed) |
+
+`lr_baseline.py`: set `SOURCE_MODEL` at the top to choose which KGE model's embeddings to use (`"rotate"`, `"complex"`, `"distmult"`, `"convkb"`, `"transe"`).
+
+### Calibrated Ensemble
+
+**`models/caliensemble.py`** combines all 5 KGE models via Platt scaling:
+
+1. Score all `(h, t)` pairs with each model across all 3 relations
+2. Fit one binary logistic calibrator per relation per model (5-fold CV on train set)
+3. Average calibrated probabilities across models in the ensemble
+4. Report metrics for every model subset (1-model through 5-model combinations)
+
+### GNN Baselines (plain, homogeneous graph)
+
+| File | Description |
+|---|---|
+| `models/graph_construction.py` | Builds the plain homogeneous graph: 800 unique ABA entities as nodes, one-hot node features, a single (untyped) edge for every `(head, tail)` pair. Reuses the exact stratified train/val/test split from the KGE scripts. |
+| `models/gnn_common.py` | Shared GCN/GAT/GraphSAGE encoder + edge classifier, training loop, and metrics (Accuracy, macro Precision/Recall/F1, macro one-vs-rest AUC) — same methodology `compare_all_models.py` uses for LR. |
+| `models/gcn.py` / `models/gat.py` / `models/graphsage.py` | Train each encoder end-to-end on the 3-class relation classification task (`(head,?,tail)` → CONTRARY_TO / NOT_CONTRARY / SUPPORT). |
+
+Unlike the R-GCN baseline, these convolutions see one untyped edge — no relation-aware
+message passing and no BERT text features — which is the point: they're the "plain,
+homogeneous" step before the heterogeneous/typed-graph R-GCN comparison. Current test
+results (see `compare_all_models.png`):
+
+| Model | Accuracy | Macro-F1 | AUC |
+|---|---|---|---|
+| GCN | 0.945 | 0.576 | 0.682 |
+| GAT | 0.945 | 0.576 | 0.685 |
+| GraphSAGE | 0.911 | 0.469 | 0.882 |
+| BERT-RGCN (frozen, Takashima baseline) | 0.938 | 0.857 | 0.987 |
+
+Each run saves to `outputs/<model>_gnn_output/`: `entity_embeddings.csv`, `test_predictions.csv`
+(per-triple predicted class + softmax probabilities), and `metrics.json`.
+
+### R-GCN and HAN on a Heterogeneous Graph (typed nodes + typed edges)
+
+| File | Description |
+|---|---|
+| `models/graph_construction_hetero.py` | Builds the typed graph on top of `ABAHomogeneousGraph` (same entities, features, split). Node types — `claim` / `body` / `attacker` — come from the naming convention already used for the ABA tree (`sup_transe.py::get_node_level`). Edge types are the **structural** `(head_type, tail_type)` pairs observed in the data (`attacker→body`, `body→body`, `attacker→claim`, `body→claim`, + reverses) — not the relation label itself. |
+| `models/rgcn_common.py` | R-GCN encoder (`torch_geometric.nn.RGCNConv`, relation-aware) + the same edge classifier / training loop / metrics as `gnn_common.py`. |
+| `models/rgcn.py` | Trains R-GCN end-to-end on the typed graph. |
+| `models/han_common.py` | HAN encoder (`torch_geometric.nn.HANConv`, node-level + semantic-level attention) on the **identical** typed graph/edges as R-GCN — same `x_dict`/`edge_index_dict` built straight from `ABAHeteroGraph`'s edges, same classifier head, split, and metrics — so the only variable is the encoder. |
+| `models/han.py` | Trains HAN end-to-end on the typed graph. |
+
+**Why edge types are structural, not the relation label:** using CONTRARY_TO/NOT_CONTRARY/SUPPORT
+as the R-GCN/HAN edge type would leak the prediction target into the graph structure. Verified in
+the data: `SUPPORT` occurs **iff** `tail_type == claim`, with zero exceptions — node type alone
+already determines SUPPORT vs. not. So node type is safe to expose (it's a property of the
+data, not the specific label being predicted); the 3-way classification stays a decoder task on
+top of the encoder's node embeddings, exactly like the plain GCN/GAT/GraphSAGE models.
+
+Test results:
+
+| Model | Accuracy | Macro-F1 | AUC | Note |
+|---|---|---|---|---|
+| GCN (plain) | 0.945 | 0.576 | 0.682 | |
+| R-GCN (typed, ours) | 0.948 | 0.663 | 0.878 | CONTRARY_TO recall only 2.5% — attacker→body edges are ~34:1 imbalanced, worse than the dataset average |
+| **HAN (typed, ours)** | 0.903 | **0.772** | **0.934** | Same graph as R-GCN. CONTRARY_TO recall 54.6% (vs. R-GCN's 2.5%) — attention over neighbors handles the attacker→body imbalance far better than R-GCN's fixed per-relation weight matrix |
+| BERT-RGCN (Takashima baseline) | 0.938 | 0.857 | 0.987 | has BERT text features, ours doesn't |
+
+### Comparison and Visualization
+
+| File | Description |
+|---|---|
+| `models/compare_all_models.py` | Loads KGE CSVs + re-runs LR + loads GCN/GAT/GraphSAGE metrics + loads Takashima JSON; prints Tables 1 & 2; saves PNG + JSON |
+| `models/visualize_results.py` | Reads `sup_experiment_results.xlsx`; produces per-model bar charts for KGE + LR |
+
+`compare_all_models.py` looks for the Takashima R-GCN baseline JSON at (first match wins):
+`../takashima-master-thesis-march-2026/data/training_results/exp_all_models_3class_fixed/experiment_results.json`,
+falling back to `exp_all_models_3class_final/experiment_results.json` in either
+`../takashima-master-thesis-march-2026/` or `../realearn-repo/takashima-master-thesis-march-2026/`.
 
 ## Project Structure
 
 ```
-ABA-MINING-TASKS-GRAPH-EMBEDDING-KMITL-INTERNSHIP-2026/
-├── rotate_output/                  # Output folder — RotatE full dataset
-│   └── negative_samples.csv        # Negative triples captured during training
-├── rotate_pnnp_output/             # Output folder — RotatE PNNP dataset
-│   └── negative_samples.csv        # Negative triples captured during training
-├── transe_output/                  # Output folder — TransE full dataset
-│   └── negative_samples.csv        # Negative triples captured during training
-├── transe_pnnp_output/             # Output folder — TransE PNNP dataset
-│   └── negative_samples.csv        # Negative triples captured during training
-├── experiment_results.xlsx         # Auto-recorded results for all runs
-├── hotel_contrary_dataset_all.csv  # Full dataset (91,714 triples)
-├── hotel_contrary_dataset_PNNP.csv # Filtered dataset (13,942 triples)
-├── README.md                       # Project documentation
-├── rotate_EXT.py                   # RotatE — full dataset (ExtendedBasicNegativeSampler)
-├── rotate_pnnp_EXT.py              # RotatE — PNNP dataset (ExtendedBasicNegativeSampler)
-├── rotate_pnnp.py                  # RotatE — PNNP dataset (standard basic sampler)
-├── rotate.py                       # RotatE — full dataset (standard basic sampler)
-├── transe_EXT.py                   # TransE — full dataset (ExtendedBasicNegativeSampler)
-├── transe_pnnp_EXT.py              # TransE — PNNP dataset (ExtendedBasicNegativeSampler)
-├── transe_pnnp.py                  # TransE — PNNP dataset (standard basic sampler)
-└── transe.py                       # TransE — full dataset (standard basic sampler)
-```
-
-## Datasets
-
-### Full Dataset (`hotel_contrary_dataset_all.csv`)
-
-- **Total triples:** 91,714
-- **Source:** All 4 sheet types from the original Excel files
-
-**Relations:**
-
-| Relation      | Count  | Percentage | Description                    |
-|---------------|-------:|-----------:|---------------------------------|
-| CONTRARY_TO   | 4,776  | 5.2%       | Human-verified contrary pairs   |
-| NOT_CONTRARY  | 86,938 | 94.8%      | Verified non-contrary pairs     |
-
-### Filtered Dataset — PNNP (`hotel_contrary_dataset_PNNP.csv`)
-
-- **Total triples:** 13,942
-
-## Models
-
-The pipeline is built on PyKEEN with a custom negative sampler and evaluator. Five KGE models were trained and compared (RotatE and TransE are the models with scripts in this repo; ConvKB, ConvE, ComplEx, and DistMult were run under the same pipeline for the comparative study):
-
-| Model    | Loss                | Loop  | Notes                                                              |
-|----------|----------------------|-------|---------------------------------------------------------------------|
-| RotatE   | NSSALoss             | sLCWA | Rotation in complex space, relation corruption (edge-only), baseline model |
-| TransE   | NSSALoss             | sLCWA | Distance-based baseline, relation corruption                       |
-| ConvKB   | NSSALoss             | sLCWA | CNN over triple, relation corruption, harder negatives              |
-| ConvE    | BCEAfterSigmoidLoss  | LCWA  | 1-vs-All scoring, real-valued embeddings, compatible with PCA export |
-| ComplEx  | NSSALoss             | sLCWA | Complex space, handles symmetric & asymmetric relations             |
-| DistMult | NSSALoss             | sLCWA | Bilinear scoring, fast baseline, limited to symmetric relations     |
-
-**Common hyperparameters:** Embedding Dim = 100, Epochs = 1000 (with early stopper), Batch Size = 256, LR = 0.0001, Random Seed = 42, Train/Val/Test = 80/10/10%.
-
-**Custom negative sampling — relation (edge) corruption:** the `ExtendedBasicNegativeSampler` subclasses PyKEEN's `BasicNegativeSampler` with `corruption_scheme=("relation")`. For each positive triple `(h, r, t)`, it generates *k* negatives by sampling random relations while keeping head/tail entities fixed — semantically appropriate for contrary mining, since the goal is predicting which relation holds between a given `(head, tail)` pair rather than entity prediction.
-
-**Evaluation:** a custom `RelationRankEvaluator` computes per-relation and per-domain ranking metrics (Mean Rank, MRR, Hits@1/3/10) using PyKEEN's `RankBasedEvaluator` internals. Macro-Hits@1 is treated as the primary metric, since standard KGE metrics (Hits@3, Hits@10, overall MRR) are not meaningful with only 3 relations.
-
-## Requirements
-
-- Python 3.11
-- [PyKEEN](https://github.com/pykeen/pykeen) (1.11.1)
-- pandas
-- openpyxl (Excel result logging)
-- scikit-learn (Logistic Regression baselines, calibration)
-
-Install with:
-
-```bash
-pip install pykeen==1.11.1 pandas openpyxl scikit-learn
+aba-mining-tasks-graph-embedding-kmitl-internship-2026/
+├── data/
+│   ├── input_data/
+│   │   └── hotel_contrary_dataset_support.csv   ← main dataset (3 relations, 4 domains)
+│   └── experiment_results/
+│       └── sup_experiment_results.xlsx          ← auto-recorded experiment log
+├── models/
+│   ├── sup_rotate.py          ← RotatE training + evaluation
+│   ├── sup_complex.py         ← ComplEx training + evaluation
+│   ├── sup_distmult.py        ← DistMult training + evaluation
+│   ├── sup_convkb.py          ← ConvKB training + evaluation
+│   ├── sup_transe.py          ← TransE training + evaluation
+│   ├── lr_baseline.py         ← LR on KGE embeddings (4 strategies)
+│   ├── lr_onehot.py           ← LR on one-hot entity encoding
+│   ├── graph_construction.py  ← Plain homogeneous ABA graph + shared split
+│   ├── gnn_common.py          ← Shared GCN/GAT/GraphSAGE encoder + train/eval loop
+│   ├── gcn.py                 ← GCN training + evaluation
+│   ├── gat.py                 ← GAT training + evaluation
+│   ├── graphsage.py           ← GraphSAGE training + evaluation
+│   ├── graph_construction_hetero.py ← Typed (heterogeneous) ABA graph
+│   ├── rgcn_common.py         ← R-GCN encoder + train/eval loop
+│   ├── rgcn.py                ← R-GCN training + evaluation
+│   ├── han_common.py          ← HAN encoder + train/eval loop (same typed graph as R-GCN)
+│   ├── han.py                 ← HAN training + evaluation
+│   ├── caliensemble.py        ← Calibrated ensemble (all 5 KGE models)
+│   ├── compare_all_models.py  ← Full comparison (KGE + LR + GNN + Takashima)
+│   ├── visualize_results.py   ← Visualization from experiment Excel
+│   └── testcases_sup.py       ← Unit test suite (458 tests)
+└── outputs/
+    ├── rotate_sup_output/        ← RotatE outputs
+    ├── complex_sup_output/       ← ComplEx outputs
+    ├── distmult_sup_output/      ← DistMult outputs
+    ├── convkb_sup_output/        ← ConvKB outputs
+    ├── transe_sup_output/        ← TransE outputs
+    ├── onehot_sup_output/        ← OneHot-LR outputs
+    ├── gcn_gnn_output/           ← GCN outputs
+    ├── gat_gnn_output/           ← GAT outputs
+    ├── graphsage_gnn_output/     ← GraphSAGE outputs
+    ├── rgcn_gnn_output/          ← R-GCN (typed graph) outputs
+    ├── han_gnn_output/           ← HAN (typed graph) outputs
+    ├── ensemble_output/          ← Ensemble results
+    └── compare_all_models.png    ← 3×3 comparison figure (18 models)
 ```
 
 ## How to Run
 
-Each script trains and evaluates one model on one dataset variant, then logs results to `experiment_results.xlsx`.
+### 1. Train a KGE model
 
 ```bash
-# RotatE — full dataset, standard basic sampler
-python rotate.py
-
-# RotatE — full dataset, ExtendedBasicNegativeSampler (relation corruption)
-python rotate_EXT.py
-
-# RotatE — PNNP (filtered) dataset, standard basic sampler
-python rotate_pnnp.py
-
-# RotatE — PNNP (filtered) dataset, ExtendedBasicNegativeSampler
-python rotate_pnnp_EXT.py
+cd models
+python sup_rotate.py   # or sup_complex.py, sup_distmult.py, etc.
 ```
 
-The `transe*.py` scripts follow the same four variants for TransE. Each run:
+Requires a GPU for practical training times. Outputs are saved to `outputs/<model>_sup_output/`.
 
-- Loads the corresponding dataset (`hotel_contrary_dataset_all.csv` or `hotel_contrary_dataset_PNNP.csv`)
-- Trains with the hyperparameters above
-- Writes captured negative triples to `<model>_output/negative_samples.csv` (or `<model>_pnnp_output/` for the PNNP variant)
-- Appends a results row (MR, MRR, Hits@1/3/10, training time, timestamp) to `experiment_results.xlsx`
+### 2. LR baseline
 
-## Results
+```bash
+# Edit SOURCE_MODEL in lr_baseline.py first (e.g. "rotate")
+python models/lr_baseline.py
 
-### Individual KGE Model Evaluation (5 models, 3-class, macro)
+# One-hot version (no GPU, no prior KGE run needed)
+python models/lr_onehot.py
+```
 
-| Model    | MRR    | MR    | Macro H@1 | Accuracy | Precision | Recall | F1     | CT H@1 | NC H@1 | SUP H@1 |
-|----------|--------|-------|-----------|----------|-----------|--------|--------|--------|--------|---------|
-| TransE   | 0.9801 | 1.040 | 0.8066    | 0.9601   | 0.8378    | 0.8066 | 0.8079 | 0.431  | 0.989  | 1.000   |
-| RotatE   | 0.9809 | 1.038 | 0.8138    | 0.9617   | 0.8472    | 0.8138 | 0.8169 | 0.452  | 0.989  | 1.000   |
-| ComplEx  | 0.9882 | 1.024 | 0.8667    | 0.9769   | 0.9095    | 0.8667 | 0.8848 | 0.692  | 0.993  | 0.915   |
-| ConvKB   | 0.9814 | 1.038 | 0.8134    | 0.9634   | 0.8481    | 0.8134 | 0.8213 | 0.500  | 0.989  | 0.951   |
-| DistMult | 0.9777 | 1.045 | 0.7147    | 0.9555   | 0.9567    | 0.7147 | 0.7343 | 0.144  | 1.000  | 1.000   |
+### 3. GNN baselines (plain, homogeneous graph)
 
-**Key finding:** ComplEx is the strongest individual model, particularly on CONTRARY_TO (0.692 Hits@1), because its Hermitian inner product handles both symmetric and antisymmetric relation patterns. DistMult collapses on CONTRARY_TO (0.144) because its symmetric scoring function is structurally mismatched to an antisymmetric relation. CONTRARY_TO is the hardest relation for every model, driven by data sparsity (~3,820 training triples vs. ~69,493 for NOT_CONTRARY).
+```bash
+cd models
+python gcn.py         # or gat.py, graphsage.py
+```
 
-### Baseline Comparison — KGE + Logistic Regression
+No GPU required (800-node graph, full-batch training, seconds per run).
 
-| Model        | MRR    | MR    | Macro H@1 | Accuracy | Precision | Recall | F1     | AUC    |
-|--------------|--------|-------|-----------|----------|-----------|--------|--------|--------|
-| ComplEx+LR   | 0.9851 | 1.030 | 0.9704    | 0.9262   | 0.8893    | 0.9262 | 0.9057 | 0.9841 |
-| DistMult+LR  | 0.9741 | 1.052 | 0.9482    | 0.9526   | 0.8318    | 0.9526 | 0.8712 | 0.9881 |
-| OneHot+LR    | 0.9686 | 1.063 | 0.9372    | 0.9705   | 0.8163    | 0.9705 | 0.8607 | 0.9890 |
+### 4. R-GCN / HAN on the typed graph
 
-### Calibrated Ensemble
+```bash
+cd models
+python rgcn.py   # or han.py — same graph, attention-based encoder instead
+```
 
-A calibrated ensemble pipeline averages one-vs-rest, softmax-normalized probabilities across model subsets (all 31 combinations of the 5 KGE models), with 5-fold cross-validation used to fit the calibrators without bias.
+### 5. Calibrated ensemble
 
-| Model / Ensemble    | Type        | Micro H@1 | Macro H@1 | CT H@1 | NC H@1 | SUP H@1 | MRR   | Mean Rank |
-|----------------------|-------------|-----------|-----------|--------|--------|---------|-------|-----------|
-| ComplEx               | Individual  | 0.977     | 0.869     | 0.699  | 0.993  | 0.915   | 0.988 | 1.024     |
-| **ComplEx + ConvKB**  | Ensemble-2  | **0.978** | **0.887** | **0.690** | 0.994 | 0.976 | **0.989** | **1.022** |
-| Full 5-model ensemble | Ensemble-5  | 0.968     | 0.835     | 0.510  | 0.993  | 1.000   | 0.984 | 1.032     |
+All 5 KGE training scripts must have completed first (so all `.pkl` files exist):
 
-**Key finding:** ComplEx + ConvKB is the best-performing combination overall (Macro H@1 = 0.887), marginally improving on standalone ComplEx while reducing variance. Larger ensembles (3–5 models) do not consistently outperform the best pair — the full 5-model ensemble actually scores worse than ComplEx alone, since including DistMult (CT H@1 = 0.144) dilutes ensemble quality. No combination exceeds ComplEx's individual CONTRARY_TO score of 0.699, confirming the bottleneck is data sparsity rather than model architecture.
+```bash
+python models/caliensemble.py
+```
+
+### 6. Full comparison plot
+
+```bash
+python models/compare_all_models.py
+```
+
+### 7. Run tests
+
+```bash
+cd models
+python -m pytest testcases_sup.py -v
+```
+
+## Key Metrics
+
+| Metric | Notes |
+|---|---|
+| **Macro-Hits@1** | Primary metric — per-relation accuracy averaged equally across 3 relations |
+| **Micro-Hits@1** | Overall accuracy (dominated by NOT_CONTRARY at 93.9%) |
+| **MRR** | Mean reciprocal rank across test triples |
+| Hits@3, Hits@10 | Trivially 1.0 with only 3 relations — not informative |
+
+The custom `RelationRankEvaluator` in each KGE script scores all 3 relations for every `(h, ?, t)` query and ranks the true relation — exactly mirroring the relation corruption training objective.
